@@ -160,7 +160,7 @@ impl MmapFile {
         }
 
         // optimization, we don't care about the return code
-        #[cfg(target_family = "unix")]
+        #[cfg(all(unix, not(target_os = "macos")))]
         unsafe {
             libc::posix_fallocate(file.as_raw_fd(), 0, HEADER_SIZE as i64)
         };
