@@ -1,4 +1,5 @@
 use anyhow::{anyhow, bail, ensure};
+use bytemuck::{bytes_of, from_bytes};
 use fslock::LockFile;
 use parking_lot::Mutex;
 use std::{
@@ -531,6 +532,7 @@ impl CandyStore {
     ) -> Result<bool> {
         let existed = self.discard_queue(key)?;
         self.extend_queue(key, val.as_ref().chunks(MAX_VALUE_SIZE))?;
+        self.push_to_queue_tail(key, bytes_of(&val.as_ref().len()))?;
         Ok(existed)
     }
 
@@ -538,17 +540,20 @@ impl CandyStore {
     /// caller.
     pub fn get_big(&self, key: &[u8]) -> Result<Option<Vec<u8>>> {
         let mut val = vec![];
-        let mut exists = false;
+        let range = self.queue_range(key)?;
         for res in self.iter_queue(key) {
-            let (_, chunk) = res?;
-            exists = true;
-            val.extend_from_slice(&chunk);
+            let (idx, chunk) = res?;
+            // last element should encode the byte length of the item - if it's missing or encodes a different length,
+            // consider it corrupt and ignore this element
+            if idx + 1 == range.end {
+                if chunk.len() == size_of::<usize>() && *from_bytes::<usize>(&chunk) == val.len() {
+                    return Ok(Some(val));
+                }
+            } else {
+                val.extend_from_slice(&chunk);
+            }
         }
-        if exists {
-            Ok(Some(val))
-        } else {
-            Ok(None)
-        }
+        Ok(None)
     }
 
     /// Removes a big item by key. Returns true if the key had existed, false otherwise.
