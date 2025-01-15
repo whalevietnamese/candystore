@@ -221,10 +221,19 @@ impl MmapFile {
     }
 
     // reading doesn't require holding any locks - we only ever extend the file, never overwrite data
-    fn read_kv(&self, stats: &InternalStats, offset_and_size: u64) -> Result<KVPair> {
+    fn _read_kv(
+        &self,
+        stats: &InternalStats,
+        offset_and_size: u64,
+        include_val: bool,
+    ) -> Result<KVPair> {
         let klen = (offset_and_size >> 48) as usize;
         debug_assert_eq!(klen >> 14, 0, "attempting to read a special key");
-        let vlen = ((offset_and_size >> 32) & 0xffff) as usize;
+        let vlen = if include_val {
+            ((offset_and_size >> 32) & 0xffff) as usize
+        } else {
+            0
+        };
         let offset = (offset_and_size as u32) as u64;
         let mut buf = vec![0u8; klen + vlen];
         self.file.read_exact_at(&mut buf, HEADER_SIZE + offset)?;
@@ -232,10 +241,18 @@ impl MmapFile {
         stats.num_read_bytes.fetch_add(buf.len(), Ordering::Relaxed);
         stats.num_read_ops.fetch_add(1, Ordering::Relaxed);
 
-        let val = buf[klen..klen + vlen].to_owned();
-        buf.truncate(klen);
+        if include_val {
+            let val = buf[klen..klen + vlen].to_owned();
+            buf.truncate(klen);
 
-        Ok((buf, val))
+            Ok((buf, val))
+        } else {
+            Ok((buf, vec![]))
+        }
+    }
+
+    fn read_kv(&self, stats: &InternalStats, offset_and_size: u64) -> Result<KVPair> {
+        self._read_kv(stats, offset_and_size, true)
     }
 
     // writing doesn't require holding any locks since we write with an offset
@@ -769,12 +786,19 @@ impl Shard {
         )
     }
 
-    pub(crate) fn read_at(&self, row_idx: usize, entry_idx: usize) -> Result<Option<KVPair>> {
+    pub(crate) fn read_at(
+        &self,
+        row_idx: usize,
+        entry_idx: usize,
+        include_val: bool,
+    ) -> Result<Option<KVPair>> {
         self.operate_on_row(row_idx, |file, row| {
             if row.signatures[entry_idx] != INVALID_SIG {
-                Ok(Some(
-                    file.read_kv(&self.stats, row.offsets_and_sizes[entry_idx])?,
-                ))
+                Ok(Some(file._read_kv(
+                    &self.stats,
+                    row.offsets_and_sizes[entry_idx],
+                    include_val,
+                )?))
             } else {
                 Ok(None)
             }

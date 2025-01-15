@@ -119,16 +119,18 @@ pub struct CandyStoreIterator<'a> {
     row_idx: usize,
     entry_idx: usize,
     raw: bool,
+    include_val: bool,
 }
 
 impl<'a> CandyStoreIterator<'a> {
-    fn new(store: &'a CandyStore, raw: bool) -> Self {
+    fn new(store: &'a CandyStore, raw: bool, include_val: bool) -> Self {
         Self {
             store,
             shard_selector: 0,
             row_idx: 0,
             entry_idx: 0,
             raw,
+            include_val,
         }
     }
 
@@ -141,13 +143,14 @@ impl<'a> CandyStoreIterator<'a> {
     }
 
     // Constructs an iterator starting at the given cookie
-    pub fn from_cookie(store: &'a CandyStore, cookie: u64, raw: bool) -> Self {
+    pub fn from_cookie(store: &'a CandyStore, cookie: u64, raw: bool, include_val: bool) -> Self {
         Self {
             store,
             shard_selector: ((cookie >> 32) & 0xffff) as u32,
             row_idx: ((cookie >> 16) & 0xffff) as usize,
             entry_idx: (cookie & 0xffff) as usize,
             raw,
+            include_val,
         }
     }
 }
@@ -168,7 +171,7 @@ impl<'a> Iterator for CandyStoreIterator<'a> {
                         self.row_idx += 1;
                     }
 
-                    let Some((mut k, v)) = sh.read_at(row_idx, entry_idx)? else {
+                    let Some((mut k, v)) = sh.read_at(row_idx, entry_idx, self.include_val)? else {
                         continue;
                     };
                     if self.raw {
@@ -475,16 +478,35 @@ impl CandyStore {
 
     /// Returns an iterator over the whole store (skipping lists or typed items)
     pub fn iter(&self) -> CandyStoreIterator {
-        CandyStoreIterator::new(self, false)
+        CandyStoreIterator::new(self, false, true)
+    }
+
+    /// Returns an iterator of keys only over the whole store (skipping lists or typed items)
+    pub fn iter_keys(&self) -> impl Iterator<Item = Result<Vec<u8>>> + use<'_> {
+        CandyStoreIterator::new(self, false, true).map(|res| match res {
+            Ok(kv) => Ok(kv.0),
+            Err(e) => Err(e),
+        })
     }
 
     pub fn iter_raw(&self) -> CandyStoreIterator {
-        CandyStoreIterator::new(self, true)
+        CandyStoreIterator::new(self, true, true)
     }
 
     /// Returns an iterator starting from the specified cookie (obtained via [CandyStoreIterator::cookie])
     pub fn iter_from_cookie(&self, cookie: u64) -> CandyStoreIterator {
-        CandyStoreIterator::from_cookie(self, cookie, false)
+        CandyStoreIterator::from_cookie(self, cookie, false, true)
+    }
+
+    /// Returns an iterator of keys only starting from the specified cookie (obtained via [CandyStoreIterator::cookie])
+    pub fn iter_keys_from_cookie(
+        &self,
+        cookie: u64,
+    ) -> impl Iterator<Item = Result<Vec<u8>>> + use<'_> {
+        CandyStoreIterator::from_cookie(self, cookie, false, true).map(|res| match res {
+            Ok(kv) => Ok(kv.0),
+            Err(e) => Err(e),
+        })
     }
 
     /// Returns useful stats about the store

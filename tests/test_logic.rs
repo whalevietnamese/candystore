@@ -106,6 +106,15 @@ fn test_logic() -> Result<()> {
 
         assert_eq!(all_keys.len(), 1000);
 
+        let mut all_keys2 = HashSet::new();
+
+        for res in db.iter_keys() {
+            let key = res?;
+            all_keys2.insert(key);
+        }
+
+        assert_eq!(all_keys, all_keys2);
+
         Ok(())
     })
 }
