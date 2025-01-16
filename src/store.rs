@@ -227,7 +227,23 @@ impl CandyStore {
         let lockfilename = config.dir_path.join(".lock");
         let mut lockfile = fslock::LockFile::open(&lockfilename)?;
         if !lockfile.try_lock_with_pid()? {
-            bail!("Lock file {lockfilename:?} is used by another process");
+            let (pid, comm) = if let Ok(pid) = std::fs::read_to_string(&lockfilename) {
+                // this may fail on non-linux OSs, but we default to "?" anyway
+                let exe: String = std::fs::read_link(format!("/proc/{pid}/exe"))
+                    .unwrap_or("?".into())
+                    .to_string_lossy()
+                    .to_string()
+                    .to_owned();
+                (pid, exe)
+            } else {
+                ("?".into(), "?".into())
+            };
+
+            bail!(
+                "Lock file {lockfilename:?} is held by pid {} executable {}",
+                pid,
+                comm
+            );
         }
 
         let mut num_keyed_locks = config.max_concurrent_list_ops.max(4);
