@@ -225,7 +225,7 @@ impl CandyStore {
 
         std::fs::create_dir_all(dir_path)?;
         let lockfilename = config.dir_path.join(".lock");
-        let mut lockfile = fslock::LockFile::open(&lockfilename)?;
+        let mut lockfile = LockFile::open(&lockfilename)?;
         if !lockfile.try_lock_with_pid()? {
             let (pid, comm, stat) = if let Ok(mut pid) = std::fs::read_to_string(&lockfilename) {
                 // this may fail on non-linux OSs, but we default to "?" anyway
@@ -278,6 +278,11 @@ impl CandyStore {
             stats,
             //threadpool,
         })
+    }
+
+    /// returns the directory where shards are kept
+    pub fn get_shards_directory(&self) -> &Path {
+        &self.config.dir_path
     }
 
     /// Syncs all in-memory changes of all shards to disk. Concurrent changes are allowed while
