@@ -681,15 +681,69 @@ impl CandyStore {
         self.owned_pop_list_head(list_key.as_ref().to_owned())
     }
 
-    /// Owned version of [Self::peek_list_tail]
-    pub fn owned_pop_list_head(&self, list_key: Vec<u8>) -> Result<Option<KVPair>> {
-        for kv in self.owned_iter_list(list_key.clone()) {
-            let (k, v) = kv?;
-            if let Some(_) = self.owned_remove_from_list(list_key.clone(), k.clone())? {
-                return Ok(Some((k, v)));
+    fn _owned_pop_list(&self, list_key: Vec<u8>, fwd: bool) -> Result<Option<KVPair>> {
+        let (list_ph, list_key) = self.make_list_key(list_key);
+        let _guard = self.lock_list(list_ph);
+        let Some(list_bytes) = self.get_raw(&list_key)? else {
+            return Ok(None);
+        };
+        let mut list = *from_bytes::<List>(&list_bytes);
+        let range = list.head_idx..list.tail_idx;
+
+        const SUFFIX_LEN: usize = size_of::<PartedHash>() + ITEM_NAMESPACE.len();
+
+        let mut pop = |idx, mut untrunc_k: Vec<u8>, mut untrunc_v: Vec<u8>| {
+            if fwd {
+                list.head_idx = idx + 1;
+            } else {
+                list.tail_idx = idx - 1;
+            }
+            list.num_items -= 1;
+            if list.is_empty() {
+                self.remove_raw(&list_key)?;
+            } else {
+                self.set_raw(&list_key, bytes_of(&list))?;
+            }
+
+            // remove chain
+            self.remove_raw(bytes_of(&ChainKey {
+                list_ph,
+                idx,
+                namespace: CHAIN_NAMESPACE,
+            }))?;
+
+            // remove item
+            self.remove_raw(&untrunc_k)?;
+
+            untrunc_v.truncate(untrunc_v.len() - size_of::<u64>());
+            untrunc_k.truncate(untrunc_k.len() - SUFFIX_LEN);
+            return Ok(Some((untrunc_k, untrunc_v)));
+        };
+
+        if fwd {
+            for idx in range {
+                if let Some((_, untrunc_k, untrunc_v)) =
+                    self.get_from_list_at_index(list_ph, idx, false)?
+                {
+                    return pop(idx, untrunc_k, untrunc_v);
+                }
+            }
+        } else {
+            for idx in range.rev() {
+                if let Some((_, untrunc_k, untrunc_v)) =
+                    self.get_from_list_at_index(list_ph, idx, false)?
+                {
+                    return pop(idx, untrunc_k, untrunc_v);
+                }
             }
         }
+
         Ok(None)
+    }
+
+    /// Owned version of [Self::peek_list_tail]
+    pub fn owned_pop_list_head(&self, list_key: Vec<u8>) -> Result<Option<KVPair>> {
+        self._owned_pop_list(list_key, true /* fwd */)
     }
 
     /// Removes and returns the last (tail) element of the list
@@ -699,13 +753,7 @@ impl CandyStore {
 
     /// Owned version of [Self::peek_list_tail]
     pub fn owned_pop_list_tail(&self, list_key: Vec<u8>) -> Result<Option<KVPair>> {
-        for kv in self.owned_iter_list_backwards(list_key.clone()) {
-            let (k, v) = kv?;
-            if let Some(_) = self.owned_remove_from_list(list_key.clone(), k.clone())? {
-                return Ok(Some((k, v)));
-            }
-        }
-        Ok(None)
+        self._owned_pop_list(list_key, false /* fwd */)
     }
 
     /// Returns the estimated list length
