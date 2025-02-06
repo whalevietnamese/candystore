@@ -544,6 +544,23 @@ where
     {
         self.store.owned_list_len(Self::make_list_key(list_key))
     }
+
+    /// Same as [CandyStore::retain_in_list], but `list_key` is typed
+    pub fn retain<Q: ?Sized + Encode>(
+        &self,
+        list_key: &Q,
+        mut func: impl FnMut(&K, &V) -> Result<bool>,
+    ) -> Result<()>
+    where
+        L: Borrow<Q>,
+    {
+        let list_key = Self::make_list_key(list_key);
+        self.store.owned_retain_in_list(list_key, |k, v| {
+            let tk = from_bytes::<K>(&k)?;
+            let tv = from_bytes::<V>(&v)?;
+            func(&tk, &tv)
+        })
+    }
 }
 
 /// A wrapper around [CandyStore] that exposes the queue API in a typed manner. See [CandyTypedStore] for more

@@ -470,6 +470,8 @@ impl CandyStore {
         Ok(Some(existing_val))
     }
 
+    const LIST_KEY_SUFFIX_LEN: usize = size_of::<PartedHash>() + ITEM_NAMESPACE.len();
+
     fn get_from_list_at_index(
         &self,
         list_ph: PartedHash,
@@ -486,7 +488,7 @@ impl CandyStore {
         };
         let item_ph = *from_bytes::<PartedHash>(&item_ph_bytes);
 
-        let mut suffix = [0u8; size_of::<PartedHash>() + ITEM_NAMESPACE.len()];
+        let mut suffix = [0u8; Self::LIST_KEY_SUFFIX_LEN];
         suffix[0..size_of::<PartedHash>()].copy_from_slice(bytes_of(&list_ph));
         suffix[size_of::<PartedHash>()..].copy_from_slice(ITEM_NAMESPACE);
 
@@ -681,64 +683,75 @@ impl CandyStore {
         self.owned_pop_list_head(list_key.as_ref().to_owned())
     }
 
-    fn _owned_pop_list(&self, list_key: Vec<u8>, fwd: bool) -> Result<Option<KVPair>> {
+    fn _operate_on_list<T>(
+        &self,
+        list_key: Vec<u8>,
+        default: T,
+        func: impl FnOnce(PartedHash, Vec<u8>, List) -> Result<T>,
+    ) -> Result<T> {
         let (list_ph, list_key) = self.make_list_key(list_key);
         let _guard = self.lock_list(list_ph);
         let Some(list_bytes) = self.get_raw(&list_key)? else {
-            return Ok(None);
+            return Ok(default);
         };
-        let mut list = *from_bytes::<List>(&list_bytes);
-        let range = list.head_idx..list.tail_idx;
+        let list = *from_bytes::<List>(&list_bytes);
+        func(list_ph, list_key, list)
+    }
 
-        const SUFFIX_LEN: usize = size_of::<PartedHash>() + ITEM_NAMESPACE.len();
+    fn _owned_pop_list(&self, list_key: Vec<u8>, fwd: bool) -> Result<Option<KVPair>> {
+        self._operate_on_list(list_key, None, |list_ph, list_key, mut list| {
+            let range = list.head_idx..list.tail_idx;
 
-        let mut pop = |idx, mut untrunc_k: Vec<u8>, mut untrunc_v: Vec<u8>| {
+            let mut pop = |idx| -> Result<Option<KVPair>> {
+                let Some((_, mut untrunc_k, mut untrunc_v)) =
+                    self.get_from_list_at_index(list_ph, idx, false)?
+                else {
+                    return Ok(None);
+                };
+
+                if fwd {
+                    list.head_idx = idx + 1;
+                } else {
+                    list.tail_idx = idx - 1;
+                }
+                list.num_items -= 1;
+                if list.is_empty() {
+                    self.remove_raw(&list_key)?;
+                } else {
+                    self.set_raw(&list_key, bytes_of(&list))?;
+                }
+
+                // remove chain
+                self.remove_raw(bytes_of(&ChainKey {
+                    list_ph,
+                    idx,
+                    namespace: CHAIN_NAMESPACE,
+                }))?;
+
+                // remove item
+                self.remove_raw(&untrunc_k)?;
+
+                untrunc_v.truncate(untrunc_v.len() - size_of::<u64>());
+                untrunc_k.truncate(untrunc_k.len() - Self::LIST_KEY_SUFFIX_LEN);
+                Ok(Some((untrunc_k, untrunc_v)))
+            };
+
             if fwd {
-                list.head_idx = idx + 1;
+                for idx in range {
+                    if let Some(kv) = pop(idx)? {
+                        return Ok(Some(kv));
+                    }
+                }
             } else {
-                list.tail_idx = idx - 1;
-            }
-            list.num_items -= 1;
-            if list.is_empty() {
-                self.remove_raw(&list_key)?;
-            } else {
-                self.set_raw(&list_key, bytes_of(&list))?;
-            }
-
-            // remove chain
-            self.remove_raw(bytes_of(&ChainKey {
-                list_ph,
-                idx,
-                namespace: CHAIN_NAMESPACE,
-            }))?;
-
-            // remove item
-            self.remove_raw(&untrunc_k)?;
-
-            untrunc_v.truncate(untrunc_v.len() - size_of::<u64>());
-            untrunc_k.truncate(untrunc_k.len() - SUFFIX_LEN);
-            return Ok(Some((untrunc_k, untrunc_v)));
-        };
-
-        if fwd {
-            for idx in range {
-                if let Some((_, untrunc_k, untrunc_v)) =
-                    self.get_from_list_at_index(list_ph, idx, false)?
-                {
-                    return pop(idx, untrunc_k, untrunc_v);
+                for idx in range.rev() {
+                    if let Some(kv) = pop(idx)? {
+                        return Ok(Some(kv));
+                    }
                 }
             }
-        } else {
-            for idx in range.rev() {
-                if let Some((_, untrunc_k, untrunc_v)) =
-                    self.get_from_list_at_index(list_ph, idx, false)?
-                {
-                    return pop(idx, untrunc_k, untrunc_v);
-                }
-            }
-        }
 
-        Ok(None)
+            Ok(None)
+        })
     }
 
     /// Owned version of [Self::peek_list_tail]
@@ -768,5 +781,81 @@ impl CandyStore {
         };
 
         Ok(from_bytes::<List>(&list_bytes).num_items as usize)
+    }
+
+    /// iterate over the given list and retain all elements for which the predicate returns `true`. In other
+    /// words, drop all other elements. This operation is not crash safe, and holds the list locked during the
+    /// whole iteration, so no other sets/deletes can be done in the background
+    pub fn retain_in_list<B: AsRef<[u8]> + ?Sized>(
+        &self,
+        list_key: &B,
+        func: impl FnMut(&[u8], &[u8]) -> Result<bool>,
+    ) -> Result<()> {
+        self.owned_retain_in_list(list_key.as_ref().to_owned(), func)
+    }
+
+    /// owned version of [Self::retain_in_list]
+    pub fn owned_retain_in_list(
+        &self,
+        list_key: Vec<u8>,
+        mut func: impl FnMut(&[u8], &[u8]) -> Result<bool>,
+    ) -> Result<()> {
+        self._operate_on_list(list_key, (), |list_ph, list_key, mut list| {
+            let range = list.head_idx..list.tail_idx;
+
+            for idx in range {
+                let Some((item_ph, untrunc_k, mut untrunc_v)) =
+                    self.get_from_list_at_index(list_ph, idx, false)?
+                else {
+                    continue;
+                };
+
+                list.head_idx = idx + 1;
+
+                untrunc_v.truncate(untrunc_v.len() - size_of::<u64>());
+                let mut v = untrunc_v;
+                let k = &untrunc_k[..untrunc_k.len() - Self::LIST_KEY_SUFFIX_LEN];
+
+                // remove chain
+                self.remove_raw(bytes_of(&ChainKey {
+                    list_ph,
+                    idx,
+                    namespace: CHAIN_NAMESPACE,
+                }))?;
+
+                if func(k, &v)? {
+                    let tail_idx = list.tail_idx;
+                    list.tail_idx += 1;
+
+                    // create chain
+                    self.set_raw(
+                        bytes_of(&ChainKey {
+                            list_ph,
+                            idx: tail_idx,
+                            namespace: CHAIN_NAMESPACE,
+                        }),
+                        bytes_of(&item_ph),
+                    )?;
+
+                    // create new item
+                    v.extend_from_slice(bytes_of(&tail_idx));
+                    self.set_raw(&untrunc_k, &v)?;
+                } else {
+                    // drop from list
+                    list.num_items -= 1;
+
+                    // remove item
+                    self.remove_raw(&untrunc_k)?;
+                }
+
+                if list.is_empty() {
+                    self.remove_raw(&list_key)?;
+                } else {
+                    self.set_raw(&list_key, bytes_of(&list))?;
+                }
+            }
+
+            Ok(())
+        })
     }
 }

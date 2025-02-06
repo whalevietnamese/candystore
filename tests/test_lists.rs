@@ -73,7 +73,7 @@ fn test_lists() -> Result<()> {
         assert_eq!(db.list_len("xxx")?, 0);
 
         for i in 0..10_000 {
-            db.set_in_list("xxx", &format!("my key {i}"), 
+            db.set_in_list("xxx", &format!("my key {i}"),
                 "very long key aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")?;
             assert_eq!(db.list_len("xxx")?, i + 1);
         }
@@ -423,6 +423,93 @@ fn test_list_compaction() -> Result<()> {
             .collect::<Vec<_>>();
 
         assert_eq!(keys1, keys2);
+
+        Ok(())
+    })
+}
+
+#[test]
+fn test_list_retain() -> Result<()> {
+    run_in_tempdir(|dir| {
+        let db = Arc::new(CandyStore::open(dir, Config::default())?);
+
+        {
+            let mut dropped = 0;
+
+            for i in 0u32..1000 {
+                db.set_in_list("xxx", &i.to_le_bytes(), "yyy")?;
+            }
+            for i in 0u32..1000 {
+                if i % 7 == 0 {
+                    db.remove_from_list("xxx", &i.to_le_bytes())?;
+                    dropped += 1;
+                }
+            }
+
+            db.retain_in_list("xxx", |k, _v| {
+                let k2 = u32::from_le_bytes(k.try_into().unwrap());
+                if k2 % 5 == 0 {
+                    dropped += 1;
+                    Ok(false)
+                } else {
+                    Ok(true) // keep
+                }
+            })?;
+
+            assert_eq!(db.list_len("xxx")?, 1000 - dropped);
+
+            let mut found = vec![];
+            for item in db.iter_list("xxx") {
+                let (k, v) = item?;
+                let k2 = u32::from_le_bytes(k.try_into().unwrap());
+                assert_ne!(k2 % 7, 0);
+                assert_ne!(k2 % 5, 0);
+                assert_eq!(v, b"yyy");
+                found.push(k2);
+            }
+            assert_eq!(found.len(), 1000 - dropped);
+
+            db.retain_in_list("xxx", |_k, _v| Ok(false))?;
+
+            assert_eq!(db.list_len("xxx")?, 0);
+        }
+
+        {
+            let typed = CandyTypedList::<String, u32, u32>::new(db);
+
+            let mut dropped = 0;
+
+            for i in 0u32..1000 {
+                typed.set("xxx", &i, &(i * 2))?;
+            }
+            for i in 0u32..1000 {
+                if i % 7 == 0 {
+                    typed.remove("xxx", &i)?;
+                    dropped += 1
+                }
+            }
+
+            typed.retain("xxx", |k, _v| {
+                if k % 5 == 0 {
+                    dropped += 1;
+                    Ok(false)
+                } else {
+                    Ok(true) // keep
+                }
+            })?;
+
+            assert_eq!(typed.len("xxx")?, 1000 - dropped);
+
+            let mut found = vec![];
+            for item in typed.iter("xxx") {
+                let (k, v) = item?;
+                assert_ne!(k % 7, 0);
+                assert_ne!(k % 5, 0);
+                assert_eq!(v, k * 2);
+                found.push(k);
+            }
+            assert_eq!(found.len(), 1000 - dropped);
+        }
 
         Ok(())
     })
