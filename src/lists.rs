@@ -785,7 +785,11 @@ impl CandyStore {
 
     /// iterate over the given list and retain all elements for which the predicate returns `true`. In other
     /// words, drop all other elements. This operation is not crash safe, and holds the list locked during the
-    /// whole iteration, so no other sets/deletes can be done in the background
+    /// whole iteration, so no other gets/sets/deletes can be done in by other threads on this list while
+    /// iterating over it. Beware of deadlocks.
+    ///
+    /// This operation will also compact the list, basically popping all elements and re-pushing the retained
+    /// ones at the end, so no holes will exist by the end.
     pub fn retain_in_list<B: AsRef<[u8]> + ?Sized>(
         &self,
         list_key: &B,
@@ -804,13 +808,12 @@ impl CandyStore {
             let range = list.head_idx..list.tail_idx;
 
             for idx in range {
+                list.head_idx = idx + 1;
                 let Some((item_ph, untrunc_k, mut untrunc_v)) =
                     self.get_from_list_at_index(list_ph, idx, false)?
                 else {
                     continue;
                 };
-
-                list.head_idx = idx + 1;
 
                 untrunc_v.truncate(untrunc_v.len() - size_of::<u64>());
                 let mut v = untrunc_v;
@@ -847,14 +850,13 @@ impl CandyStore {
                     // remove item
                     self.remove_raw(&untrunc_k)?;
                 }
-
-                if list.is_empty() {
-                    self.remove_raw(&list_key)?;
-                } else {
-                    self.set_raw(&list_key, bytes_of(&list))?;
-                }
             }
-
+            // defer updating the list to the very end to save on IOs
+            if list.is_empty() {
+                self.remove_raw(&list_key)?;
+            } else {
+                self.set_raw(&list_key, bytes_of(&list))?;
+            }
             Ok(())
         })
     }
