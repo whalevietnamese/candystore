@@ -29,13 +29,13 @@ jobs:
     - name: Run typed example
       run: cargo run --example typed
     - name: Run perftest
-      run: cargo -Z unstable-options -C candy-perf run --release
+      run: cd candy-perf; cargo run --release
     - name: Run crasher
-      run: cargo -Z unstable-options -C candy-crasher run --release
+      run: cd candy-crasher; cargo run --release
     - name: Run longliving
-      run: cargo -Z unstable-options -C candy-longliving run --release -- 10 40001 10000
+      run: cd candy-longliving; cargo run --release -- 10 40001 10000
     - name: Run mini-candy
-      run: cargo -Z unstable-options -C mini-candy run
+      run: cd mini-candy; cargo run
     - name: Run test-list-collisions
       run: cargo test -F whitebox_testing --test test_list_collisions -- --nocapture
     - name: Run test-flush-agg
