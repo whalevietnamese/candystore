@@ -1,8 +1,6 @@
 #![feature(btree_cursors)]
 use std::{collections::BTreeMap, sync::atomic::AtomicUsize, time::Instant, u32};
 
-use simd_itertools::PositionSimd;
-
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 struct PartedHash {
     shard_idx: u32,
@@ -183,14 +181,14 @@ fn main() {
             v[i] = i as u32;
         }
         v[width - 1] = 80808080;
-        assert_eq!(v.iter().position_simd(80808080), Some(width - 1));
-        assert_eq!(v.iter().position_simd(80808081), None);
+        assert_eq!(v.iter().position(|x| *x == 80808080), Some(width - 1));
+        assert_eq!(v.iter().position(|x| *x == 80808081), None);
         let mut pos: usize = 0;
 
         let t0 = Instant::now();
         for _ in 0..reps {
-            pos += v.iter().position_simd(80808080).unwrap_or(0);
-            pos += v.iter().position_simd(80808081).unwrap_or(0);
+            pos += v.iter().position(|x| *x == 80808080).unwrap_or(0);
+            pos += v.iter().position(|x| *x == 80808081).unwrap_or(0);
         }
 
         println!(
@@ -208,8 +206,8 @@ fn main() {
             v[i] = i as u32;
         }
         v[width - 1] = 80808080;
-        assert_eq!(v.iter().position_simd(80808080), Some(width - 1));
-        assert_eq!(v.iter().position_simd(80808081), None);
+        assert_eq!(v.iter().position(|x| *x == 80808080), Some(width - 1));
+        assert_eq!(v.iter().position(|x| *x == 80808081), None);
         let mut pos: usize = 0;
 
         let t0 = Instant::now();

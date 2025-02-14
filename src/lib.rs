@@ -15,9 +15,7 @@
 //!
 //! A unique feature of Candy is the support of *lists*, which allow creating cheap collections.
 //!
-//! Notes:
-//! * the file format is not yet stable!
-//! * nightly is required for `simd_itertools`
+//! Note: the file format is not yet stable!
 //!
 //! Example:
 //! ```

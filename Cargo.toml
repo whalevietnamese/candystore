@@ -1,6 +1,6 @@
 [package]
 name = "candystore"
-version = "0.5.3"
+version = "0.5.4"
 edition = "2021"
 license = "Apache-2.0"
 keywords = ["key-value", "database", "persistent", "store", "rocksdb"]
@@ -11,21 +11,18 @@ repository = "https://github.com/sweet-security/candystore"
 bytemuck = { version = "1.16.3", features = ["derive"] }
 databuf = "0.5.0"
 memmap = "0.7.0"
-simd-itertools = {version = "0.2.3", optional = true}
 siphasher = "1.0.1"
 anyhow = "1.0.86"
 parking_lot = "0.12.3"
-uuid = { version = "1.10.0" }
-rand = "0.8.5"
+uuid = "1.10.0"
+rand = "0.9"
 fslock = "0.2.1"
 libc = "0.2.158"
 crossbeam-channel = "0.5.13"
 
 [features]
-default = ["simd"]
 whitebox_testing = []
 flush_aggregation = []
-simd = ["dep:simd-itertools"]
 
 [workspace]
 members = ["simulator", "candy-crasher", "candy-longliving", "candy-perf", "mini-candy"]

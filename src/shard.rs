@@ -43,22 +43,8 @@ struct ShardRow {
 
 impl ShardRow {
     #[inline]
-    #[cfg(feature = "simd")]
     fn lookup(&self, sig: u32, start_idx: &mut usize) -> Option<usize> {
-        use simd_itertools::PositionSimd;
-        if let Some(rel_idx) = self.signatures[*start_idx..].iter().position_simd(sig) {
-            let abs_idx = rel_idx + *start_idx;
-            *start_idx = abs_idx + 1;
-            Some(abs_idx)
-        } else {
-            None
-        }
-    }
-
-    #[inline]
-    #[cfg(not(feature = "simd"))]
-    fn lookup(&self, sig: u32, start_idx: &mut usize) -> Option<usize> {
-        if let Some(rel_idx) = self.signatures[*start_idx..].iter().position(|s| *s == sig) {
+        if let Some(rel_idx) = self.signatures[*start_idx..].iter().position(|x| *x == sig) {
             let abs_idx = rel_idx + *start_idx;
             *start_idx = abs_idx + 1;
             Some(abs_idx)
