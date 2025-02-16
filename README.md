@@ -1,5 +1,7 @@
 ![rust badge](https://github.com/sweet-security/candystore/actions/workflows/rust.yml/badge.svg)
 
+<p align="center">💎 v0.5.4 now works on stable rust! ✨</p>
+
 # CandyStore
 A pure rust implementation of a fast (*blazingly* :tm:, of course), persistent, in-process key-value store, that relies
 on a novel sharding algorithm. Just how blazingly? It's over 9000!
