@@ -1,6 +1,7 @@
-![rust badge](https://github.com/sweet-security/candystore/actions/workflows/rust.yml/badge.svg)
-
-<p align="center">💎 v0.5.4 now works on stable rust! ✨</p>
+<div>
+<img align="right" src="https://github.com/sweet-security/candystore/actions/workflows/rust.yml/badge.svg">
+<div align="left">💎 v0.5.4 now works on stable rust! ✨</div>
+</div>
 
 # CandyStore
 A pure rust implementation of a fast (*blazingly* :tm:, of course), persistent, in-process key-value store, that relies
